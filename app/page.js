@@ -1,101 +1,165 @@
-import Image from "next/image";
+"use client";
+import { useEffect, useRef, useState } from "react";
+import * as handpose from "@tensorflow-models/handpose";
+import * as tf from "@tensorflow/tfjs-core";
+import "@tensorflow/tfjs-backend-webgl";
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              app/page.js
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const [photo, setPhoto] = useState(null);
+  const [model, setModel] = useState(null);
+  const [isDetecting, setIsDetecting] = useState(false);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
+  useEffect(() => {
+    async function loadModel() {
+      await tf.setBackend("webgl");
+      const net = await handpose.load();
+      setModel(net);
+      console.log("✅ Handpose model loaded.");
+    }
+
+    async function setupCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+        });
+        videoRef.current.srcObject = stream;
+        console.log("✅ Camera is set up.");
+      } catch (error) {
+        console.error("❌ Error accessing camera:", error);
+      }
+    }
+
+    setupCamera();
+    loadModel();
+  }, []);
+
+  useEffect(() => {
+    if (model && videoRef.current) {
+      detectGesture();
+    }
+  }, [model]);
+
+  async function detectGesture() {
+    if (!model || !videoRef.current) {
+      console.log("⏳ Waiting for model and video...");
+      return;
+    }
+
+    if (!isDetecting) {
+      console.log("▶️ Starting hand detection...");
+      setIsDetecting(true);
+    }
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const predictions = await model.estimateHands(video);
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (predictions.length > 0) {
+      console.log("🖐 Hand detected:", predictions);
+
+      predictions.forEach((hand) => {
+        drawHand(hand.landmarks, ctx);
+
+        const fingersUp = hand.landmarks.slice(5, 21).map((pt) => pt[1]);
+        const isPeaceSign =
+          fingersUp[0] > fingersUp[1] && fingersUp[2] < fingersUp[3];
+
+        console.log("✌️ Peace Sign Detected:", isPeaceSign);
+
+        if (isPeaceSign) {
+          takePhoto();
+        }
+      });
+    } else {
+      console.log("❌ No hands detected.");
+    }
+
+    requestAnimationFrame(detectGesture);
+  }
+
+  function drawHand(landmarks, ctx) {
+    ctx.fillStyle = "red";
+    ctx.strokeStyle = "lime";
+    ctx.lineWidth = 2;
+
+    landmarks.forEach(([x, y]) => {
+      ctx.beginPath();
+      ctx.arc(x, y, 5, 0, 2 * Math.PI);
+      ctx.fill();
+    });
+
+    const fingers = [
+      [0, 1, 2, 3, 4],
+      [0, 5, 6, 7, 8],
+      [0, 9, 10, 11, 12],
+      [0, 13, 14, 15, 16],
+      [0, 17, 18, 19, 20],
+    ];
+
+    fingers.forEach((finger) => {
+      ctx.beginPath();
+      for (let i = 0; i < finger.length - 1; i++) {
+        const [x1, y1] = landmarks[finger[i]];
+        const [x2, y2] = landmarks[finger[i + 1]];
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+      }
+      ctx.stroke();
+    });
+  }
+
+  function takePhoto() {
+    console.log("📸 Taking photo...");
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const dataURL = canvas.toDataURL("image/png");
+    setPhoto(dataURL);
+  }
+
+  return (
+    <div className="flex flex-col items-center justify-center h-screen bg-gray-900 text-white">
+      <h1 className="text-3xl font-bold mb-4"> 📸Photobooth </h1>{" "}
+      <div className="relative">
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          className="w-96 h-72 rounded-lg shadow-lg"
+          onLoadedData={detectGesture}
+        />{" "}
+        <canvas ref={canvasRef} className="absolute top-0 left-0 w-96 h-72" />
+      </div>{" "}
+      {photo && (
+        <div className="mt-4">
+          <img
+            src={photo}
+            alt="Captured"
+            className="w-96 h-auto rounded-lg shadow-lg"
+          />
           <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            href={photo}
+            download="photo.png"
+            className="mt-2 inline-block bg-blue-500 px-4 py-2 rounded-md text-white"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            Download Foto{" "}
+          </a>{" "}
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+      )}{" "}
     </div>
   );
 }
